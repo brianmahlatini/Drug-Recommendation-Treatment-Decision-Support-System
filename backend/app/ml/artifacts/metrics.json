@@ -1,0 +1,23 @@
+{
+  "best_model": "xgboost",
+  "results": [
+    {
+      "model_name": "random_forest",
+      "accuracy": 0.7905,
+      "f1": 0.883,
+      "roc_auc": 0.3455
+    },
+    {
+      "model_name": "gradient_boosting_xgboost_style",
+      "accuracy": 0.7905,
+      "f1": 0.883,
+      "roc_auc": 0.5045
+    },
+    {
+      "model_name": "xgboost",
+      "accuracy": 0.8095,
+      "f1": 0.8947,
+      "roc_auc": 0.5504
+    }
+  ]
+}

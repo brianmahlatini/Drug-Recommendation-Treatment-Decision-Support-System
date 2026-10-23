@@ -10,6 +10,9 @@ A production-oriented clinical decision-support prototype where a user enters a 
 
 - Clinical profile form for age, sex, diagnosis, symptoms, severity, allergies, comorbidities, current medicines, and pregnancy status
 - Synthetic medical dataset with diagnoses, medicine attributes, patient characteristics, contraindications, interaction groups, and treatment outcomes
+- Supervised treatment-outcome models trained from synthetic historical cases
+- Random Forest baseline model for tabular outcome prediction
+- XGBoost model for boosted-tree treatment success prediction
 - Content-based treatment ranking using TF-IDF vectorization and cosine similarity
 - Rule alignment score based on diagnosis match, symptom match, and first-line status
 - Synthetic treatment outcome priors used as an additional relevance signal
@@ -19,6 +22,7 @@ A production-oriented clinical decision-support prototype where a user enters a 
 - Monitoring warnings for severe presentations and renal-risk scenarios
 - Candidate, caution, and blocked recommendation states
 - Explanation trail for every recommendation, including model similarity, rule alignment, synthetic outcome prior, and evidence tier
+- Saved model artifacts for repeatable FastAPI inference
 - FastAPI OpenAPI documentation
 - React TypeScript interface with responsive clinical workflow layout
 - Docker Compose stack for backend, frontend, and PostgreSQL
@@ -48,7 +52,9 @@ A production-oriented clinical decision-support prototype where a user enters a 
 - Pydantic
 - pandas
 - scikit-learn
+- XGBoost
 - NumPy
+- joblib
 - SQLAlchemy-ready configuration
 - Uvicorn
 - Pytest
@@ -75,12 +81,17 @@ A production-oriented clinical decision-support prototype where a user enters a 
 │   │   ├── services/
 │   │   │   ├── recommender.py         # TF-IDF ranking and recommendation explanations
 │   │   │   └── safety.py              # Allergy, contraindication, interaction checks
+│   │   ├── ml/
+│   │   │   ├── features.py            # Supervised ML feature engineering
+│   │   │   ├── outcome_model.py       # Saved model loading and prediction
+│   │   │   └── artifacts/             # Random Forest, XGBoost, metrics, best model
 │   │   └── main.py                    # FastAPI app entrypoint
 │   ├── data/
 │   │   ├── medicines.csv              # Synthetic medicine attributes and safety metadata
 │   │   └── treatment_cases.csv        # Synthetic historical-style treatment outcomes
 │   ├── scripts/
-│   │   └── generate_synthetic_data.py # Dataset generator
+│   │   ├── generate_synthetic_data.py # Dataset generator
+│   │   └── train_outcome_models.py    # Random Forest and XGBoost training
 │   ├── tests/
 │   │   ├── test_recommender.py
 │   │   └── test_safety.py
@@ -126,6 +137,10 @@ The backend is organized around explicit clinical decision-support responsibilit
 
 `services.safety` owns deterministic safety checks for allergies, contraindications, age limits, pregnancy-sensitive medicines, renal monitoring, severe acuity notes, and interaction groups.
 
+`ml.features` owns supervised feature engineering for patient-medicine pairs.
+
+`ml.outcome_model` owns loading the saved best model and predicting treatment success probability at API runtime.
+
 `api.routes` exposes the clinical metadata endpoint and the recommendation endpoint.
 
 The frontend keeps the clinical workflow separated into a profile form, recommendation results view, safety badges, shared API client, and shared TypeScript models.
@@ -135,11 +150,92 @@ The frontend keeps the clinical workflow separated into a profile form, recommen
 1. The user enters a sample clinical profile in the React UI.
 2. The frontend posts the profile to `POST /api/recommendations`.
 3. The backend converts diagnosis, symptoms, severity, and comorbidities into a clinical query.
-4. TF-IDF compares the profile query against medicine indication text, symptom text, drug class, and mechanism.
-5. Rule scoring rewards diagnosis match, symptom match, and first-line status.
-6. Synthetic outcome priors from generated treatment cases adjust ranking.
-7. Safety rules evaluate allergies, contraindications, pregnancy, age restrictions, current medicines, interaction groups, and monitoring needs.
-8. The API returns ranked recommendations with status, score, confidence, evidence tier, explanation text, and safety issues.
+4. The trained XGBoost/Random Forest model predicts treatment success probability for each patient-medicine pair.
+5. TF-IDF compares the profile query against medicine indication text, symptom text, drug class, and mechanism.
+6. Rule scoring rewards diagnosis match, symptom match, and first-line status.
+7. Synthetic outcome priors from generated treatment cases adjust ranking.
+8. Safety rules evaluate allergies, contraindications, pregnancy, age restrictions, current medicines, interaction groups, and monitoring needs.
+9. The API returns ranked recommendations with ML probability, status, score, confidence, evidence tier, explanation text, and safety issues.
+
+## Machine Learning Models
+
+The project now uses supervised tabular ML in addition to content-based recommendation logic.
+
+### Training Target
+
+The model predicts whether a patient-medicine case is likely to have a successful outcome.
+
+Successful outcomes:
+
+- `resolved`
+- `improved`
+
+Non-success outcomes:
+
+- `unchanged`
+- `adverse_event`
+
+### Model Candidates
+
+- `random_forest` using `RandomForestClassifier`
+- `gradient_boosting_xgboost_style` using scikit-learn gradient boosting fallback
+- `xgboost` using `XGBClassifier`
+
+The training script evaluates each model and saves the best model by ROC-AUC and F1.
+
+### Features
+
+The supervised model uses:
+
+- Age
+- Sex
+- Diagnosis
+- Severity
+- Candidate medicine
+- Drug class
+- Route
+- First-line flag
+- Minimum age
+- Age-below-minimum flag
+- Diagnosis match
+- Symptom match ratio
+- Symptom count
+- Allergy count
+- Comorbidity count
+- Current medication count
+- Pregnancy flag
+
+### Saved Artifacts
+
+Model artifacts are saved in:
+
+```text
+backend/app/ml/artifacts/
+```
+
+Current artifacts include:
+
+- `best_outcome_model.joblib`
+- `random_forest.joblib`
+- `xgboost.joblib`
+- `gradient_boosting_xgboost_style.joblib`
+- `metrics.json`
+
+Train or retrain the models with:
+
+```bash
+cd backend
+python scripts/train_outcome_models.py
+```
+
+The recommendation engine combines scores as:
+
+```text
+40% supervised ML success probability
+30% content similarity
+20% clinical rule alignment
+10% synthetic outcome prior
+```
 
 ## Dataset
 
@@ -182,6 +278,12 @@ cd backend
 python scripts/generate_synthetic_data.py
 ```
 
+After regenerating data, retrain the ML models:
+
+```bash
+python scripts/train_outcome_models.py
+```
+
 ## Local Setup
 
 ### Prerequisites
@@ -217,6 +319,7 @@ python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
 python scripts/generate_synthetic_data.py
+python scripts/train_outcome_models.py
 uvicorn app.main:app --reload
 ```
 
@@ -304,6 +407,7 @@ Example top candidate:
 {
   "medicine_name": "Metformin",
   "drug_class": "Biguanide antihyperglycemic",
+  "ml_success_probability": 0.83,
   "recommendation_status": "candidate",
   "confidence": "moderate"
 }
@@ -360,6 +464,13 @@ Regenerate synthetic data:
 ```bash
 cd backend
 python scripts/generate_synthetic_data.py
+```
+
+Retrain supervised ML models:
+
+```bash
+cd backend
+python scripts/train_outcome_models.py
 ```
 
 Run full stack:

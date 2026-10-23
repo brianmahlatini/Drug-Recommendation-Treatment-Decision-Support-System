@@ -31,6 +31,7 @@ class Recommendation(BaseModel):
     drug_class: str
     route: str
     score: float
+    ml_success_probability: float
     confidence: Literal["low", "moderate", "high"]
     evidence_level: str
     recommendation_status: Literal["candidate", "use_with_caution", "blocked"]

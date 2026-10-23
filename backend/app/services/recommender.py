@@ -7,6 +7,7 @@ import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
+from app.ml.outcome_model import OutcomePredictionModel
 from app.schemas.clinical import ClinicalProfile, Recommendation, RecommendationResponse
 from app.services.safety import SafetyContext, evaluate_safety, normalize_terms
 
@@ -23,6 +24,12 @@ def split_terms(value: str) -> set[str]:
     return {item.strip().lower().replace(" ", "_") for item in str(value).split(";") if item.strip()}
 
 
+def to_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"true", "1", "yes"}
+
+
 @dataclass
 class LoadedData:
     medicines: pd.DataFrame
@@ -36,6 +43,7 @@ class RecommendationEngine:
         self.vectorizer = TfidfVectorizer(ngram_range=(1, 2), min_df=1)
         self.medicine_matrix = self.vectorizer.fit_transform(self.loaded.medicines["search_text"])
         self.outcome_priors = self._build_outcome_priors()
+        self.outcome_model = OutcomePredictionModel.load()
 
     def _load_data(self) -> LoadedData:
         medicines_path = self.data_dir / "medicines.csv"
@@ -95,8 +103,14 @@ class RecommendationEngine:
             clinical_score = float(similarities[index])
             rule_score = self._rule_score(profile, row)
             outcome_score = self.outcome_priors.get(row["medicine_id"], 0.55)
-            total_score = (0.55 * clinical_score) + (0.30 * rule_score) + (0.15 * outcome_score)
-            scored_rows.append((total_score, clinical_score, rule_score, outcome_score, row))
+            ml_success_probability = self._ml_success_probability(profile, row, outcome_score)
+            total_score = (
+                (0.40 * ml_success_probability)
+                + (0.30 * clinical_score)
+                + (0.20 * rule_score)
+                + (0.10 * outcome_score)
+            )
+            scored_rows.append((total_score, clinical_score, rule_score, outcome_score, ml_success_probability, row))
 
         ranked = sorted(scored_rows, key=lambda item: item[0], reverse=True)
         recommendations = [self._to_recommendation(profile, *item) for item in ranked[:limit]]
@@ -123,9 +137,14 @@ class RecommendationEngine:
             score += 0.55
         if symptoms:
             score += 0.30 * (len(symptoms.intersection(indicated_symptoms)) / max(len(symptoms), 1))
-        if bool(row["first_line"]):
+        if to_bool(row["first_line"]):
             score += 0.15
         return min(score, 1.0)
+
+    def _ml_success_probability(self, profile: ClinicalProfile, row: pd.Series, fallback_score: float) -> float:
+        if self.outcome_model is None:
+            return float(fallback_score)
+        return self.outcome_model.predict_success_probability(profile, row)
 
     def _to_recommendation(
         self,
@@ -134,6 +153,7 @@ class RecommendationEngine:
         clinical_score: float,
         rule_score: float,
         outcome_score: float,
+        ml_success_probability: float,
         row: pd.Series,
     ) -> Recommendation:
         context = SafetyContext(
@@ -158,6 +178,7 @@ class RecommendationEngine:
 
         status = "blocked" if has_block else "use_with_caution" if has_warning else "candidate"
         explanation = [
+            f"Supervised ML predicted success probability {ml_success_probability:.2f}.",
             f"Matched diagnosis/symptom profile with content similarity {clinical_score:.2f}.",
             f"Rule alignment score {rule_score:.2f} based on indication, symptoms, and first-line status.",
             f"Synthetic outcome prior {outcome_score:.2f} from generated treatment cases.",
@@ -170,6 +191,7 @@ class RecommendationEngine:
             drug_class=row["drug_class"],
             route=row["route"],
             score=round(adjusted_score, 3),
+            ml_success_probability=round(ml_success_probability, 3),
             confidence=confidence,
             evidence_level=row["evidence_level"],
             recommendation_status=status,

@@ -22,6 +22,7 @@ export type Recommendation = {
   drug_class: string;
   route: string;
   score: number;
+  ml_success_probability: number;
   confidence: "low" | "moderate" | "high";
   evidence_level: string;
   recommendation_status: "candidate" | "use_with_caution" | "blocked";

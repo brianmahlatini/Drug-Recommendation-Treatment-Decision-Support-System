@@ -35,7 +35,9 @@ Thumbs.db
 
 # Local tooling output
 .playwright-mcp/
-artifacts/
+/artifacts/
+!backend/app/ml/artifacts/
+!backend/app/ml/artifacts/*
 
 # Docker / runtime
 *.log

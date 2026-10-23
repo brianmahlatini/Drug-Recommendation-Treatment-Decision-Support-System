@@ -16,4 +16,6 @@ def test_recommender_returns_ranked_candidates() -> None:
 
     assert response.recommendations
     assert response.recommendations[0].score >= response.recommendations[-1].score
+    assert 0 <= response.recommendations[0].ml_success_probability <= 1
+    assert any("Supervised ML predicted success probability" in item for item in response.recommendations[0].explanation)
 

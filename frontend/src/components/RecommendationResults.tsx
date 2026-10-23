@@ -47,6 +47,7 @@ export function RecommendationResults({ response, error }: Props) {
 
             <div className="score-row">
               <span>Score {(recommendation.score * 100).toFixed(0)}%</span>
+              <span>ML success {(recommendation.ml_success_probability * 100).toFixed(0)}%</span>
               <span>Confidence {recommendation.confidence}</span>
             </div>
             <div className="score-track">
